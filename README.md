@@ -1,9 +1,9 @@
-# [SEC-402] Hotfix: Bloqueo en entrega de métricas para el Panel de Cumplimiento (Compliance Dashboard)
+# [SEC-405] Hotfix: Fallo en autenticación Bearer y vulnerabilidad de autorización en el Panel de Cumplimiento
 
 | Metadata | Detalle |
 | :--- | :--- |
-| **Ticket ID** | SEC-402 |
-| **Tipo de Incidencia** | Bug / Hotfix |
+| **Ticket ID** | SEC-405 |
+| **Tipo de Incidencia** | Bug / Vulnerabilidad de Seguridad (Hotfix) |
 | **Prioridad** | 🔴 Blocker / Alta |
 | **Componente Afectado** | API Backend (`AuditModule`, `AuthModule`) |
 | **Tiempo Estimado de Resolución** | 45 Minutos |
@@ -13,29 +13,30 @@
 
 ## 📋 Resumen del Incidente
 
-El equipo de Frontend y el área de QA reportan un bloqueo crítico en la versión candidata a producción:
+El equipo de QA y los auditores de seguridad han levantado dos alertas críticas en el entorno previo a producción:
 
-> *"Al intentar consultar el endpoint de métricas de cumplimiento (`GET /audit/summary`) utilizando el Bearer Token del usuario administrador (`admin@enterprise.com`), la API responde persistentemente con un código de estado `403 Forbidden` o errores internos de servidor, impidiendo la visualización del Compliance Dashboard."*
+> *1. "Al intentar consultar el endpoint de auditoría (`GET /audit/summary`) enviando la cabecera estándar de autorización (`Authorization: Bearer <TOKEN>`) con el usuario administrador (`admin@enterprise.com`), la API responde inmediatamente con código `401 Unauthorized`, bloqueando el acceso al Compliance Dashboard."*  
+> *2. "Adicionalmente, el equipo de seguridad advierte que las directivas de control de acceso por rol (`@Roles`) no están bloqueando a usuarios con privilegios insuficientes, existiendo un riesgo crítico de acceso no autorizado a información confidencial por parte de operadores estándar."*
 
-El análisis preliminar sugiere fallas en el flujo de seguridad (autenticación y autorización) del backend, provocando que peticiones de usuarios legítimos sean rechazadas antes de procesar la lógica de negocio.
+El análisis preliminar confirma fallas en la configuración de la estrategia de extracción de tokens y en la resolución de metadatos del sistema de autorización de NestJS.
 
 ---
 
 ## 🎯 Criterios de Aceptación (Definition of Done - DoD)
 
-Para que el Pull Request sea aprobado por el Code Reviewer, la solución debe cumplir estrictamente con los siguientes criterios:
+Para que el Pull Request sea aprobado por el Tech Lead, la solución debe cumplir estrictamente con los siguientes criterios:
 
-1. **Acceso Autorizado (Admin):**
+1. **Autenticación Estándar RFC 6750:**
+   * La API debe procesar correctamente el token JWT transmitido en la cabecera estándar `Authorization: Bearer <TOKEN>`.
+2. **Acceso Autorizado (Admin):**
    * Petición a `GET /audit/summary` con un Bearer Token emitido para `admin@enterprise.com` debe responder con código **`200 OK`**.
    * La respuesta debe retornar los datos del administrador extraídos limpiamente mediante el decorador `@GetUser()`, incluyendo sus roles (`ADMIN`) y el timestamp de generación.
-2. **Acceso Denegado por Rol Insuficiente (User estándar):**
+3. **Acceso Denegado por Rol Insuficiente (User estándar):**
    * Petición a `GET /audit/summary` con un Bearer Token emitido para un usuario sin rol de administrador (ej. `operador@enterprise.com`) debe responder con código **`403 Forbidden`**.
-3. **Acceso Denegado por Falta de Autenticación:**
+4. **Acceso Denegado por Falta de Autenticación:**
    * Petición a `GET /audit/summary` sin cabecera `Authorization` o con un token inválido/expirado debe responder con código **`401 Unauthorized`**.
-4. **Validación de Integridad y Estado de Usuario:**
-   * Toda petición autenticada debe validar contra la base de datos que el usuario exista y mantenga su estado activo (`isActive: true`). Si el usuario no existe o fue desactivado, la petición debe ser rechazada con **`401 Unauthorized`**.
 5. **Arquitectura y Buenas Prácticas NestJS:**
-   * El endpoint debe estar debidamente protegido mediante el sistema modular de Guards (`JwtAuthGuard`, `RolesGuard`) y metadatos de roles (`@Roles(Role.ADMIN)`).
+   * La autorización por roles debe vincularse de forma íntegra entre el decorador de metadatos (`@Roles`) y el `RolesGuard`.
    * En los controladores, la extracción del usuario autenticado debe realizarse obligatoriamente mediante el decorador `@GetUser()`. Queda terminantemente **prohibido** inyectar el objeto nativo `@Req() req` de Express.
 
 ---
@@ -153,9 +154,9 @@ Al iniciar por primera vez, el servicio `SeedService` insertará automáticament
   * `Authorization: Bearer <TOKEN_OBTENIDO>`
 
 #### Comportamiento Reportado por QA (Estado Inicial con Incidencia):
-* Con token de Admin: Responde inesperadamente con `403 Forbidden` o error interno impidiendo el acceso.
-* Con token de Operador: Responde `403 Forbidden`.
-* Sin token: Responde de forma anómala en lugar de un `401 Unauthorized` estandarizado.
+* Con token de Admin vía `Authorization: Bearer ...`: Responde inesperadamente con `401 Unauthorized`.
+* Sin token: Responde `401 Unauthorized`.
+* Si se procesara el rol sin validar metadatos: Riesgo de permitir acceso indebido a usuarios sin permisos (`200 OK` para Operador en lugar de `403 Forbidden`).
 
 #### Comportamiento Esperado tras Aplicar la Solución:
 * **Con Token de Admin:** `200 OK`
@@ -173,7 +174,7 @@ Al iniciar por primera vez, el servicio `SeedService` insertará automáticament
       "totalAuditedEvents": 1420,
       "riskScore": "LOW",
       "complianceHealthPercent": 99.8,
-      "timestamp": "2026-10-18T20:30:00.000Z"
+      "timestamp": "2026-10-24T17:00:00.000Z"
     }
   }
   ```
@@ -192,4 +193,3 @@ Al iniciar por primera vez, el servicio `SeedService` insertará automáticament
     "statusCode": 401
   }
   ```
-

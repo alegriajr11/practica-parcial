@@ -8,7 +8,7 @@ import { User } from '../users/entities/user.entity';
 
 @Controller('audit')
 export class AuditController {
-  @UseGuards(RolesGuard, JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @Get('summary')
   getSummary(@GetUser() user: User) {
